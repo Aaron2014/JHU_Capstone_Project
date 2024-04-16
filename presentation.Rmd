@@ -1,0 +1,55 @@
+---
+title: "Next Word Prediction"
+author: "Wanjie Feng"
+date: "2024-04-15"
+output: slidy_presentation
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+## Project Overview
+
+Around the world, people are spending an increasing amount of time on their mobile devices for email, social networking, banking and a whole range of other activities. But typing on mobile devices can be a serious pain. SwiftKey, our corporate partner in this capstone, builds a smart keyboard that makes it easier for people to type on their mobile devices. One cornerstone of their smart keyboard is predictive text models. When someone types:
+
+*I went to the*
+
+the keyboard presents three options for what the next word might be. For example, the three words might be *gym, store, restaurant*. 
+
+In this capstone, the text data logged from News, Twitter, and Blogs are analyzed and processed. These data are used to build a model to predict the next word when giving a phrase. 
+
+
+
+## Outline of the Project
+
+- Data download and read in 
+- Exploratory Data Analysis
+- Build Katz backoff model
+- Predict Next Words
+- Shiny App
+
+
+## Exploratory Data Analysis
+
+```{r, echo = FALSE, warning=FALSE, message=FALSE}
+library(wordcloud)
+library(RColorBrewer)
+gram_1 <- read.csv("gram_1.csv")
+wordcloud(gram_1$Word, gram_1$Counts, scale=c(3.5, 0.02), max.words=200, random.order=FALSE,
+          rot.per=0.35, colors=brewer.pal(5, "Dark2"))
+```
+
+## Katz Backoff Model
+
+```{r, echo = FALSE, warning=FALSE, message=FALSE}
+library(patchwork)
+library(magick)
+(image_read("katz.svg")|>image_ggplot())
+```
+
+## Predict Next Word and Shiny App
+
+- The R markdown and Shiny App files can be found at https://github.com/Aaron2014/JHU_Capstone_Project
+
+- The Shiny App can be accessed at https://es0for-aaron-fong.shinyapps.io/predict_word/
