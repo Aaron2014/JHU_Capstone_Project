@@ -1,0 +1,569 @@
+---
+title: "SwiftKey_Project_Week 3 (Task 4)"
+author: "Wanjie Feng"
+date: "2024-04-09"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE)
+```
+
+## Project Overview
+
+This project explores the text data sets of SwifyKey project. This is Task 4 of this project. The goal of this part is to build and evaluate first predictive model. This part uses n-gram and Katz backoff model. A good descreption of this backoff algorithm can be found here at https://rpubs.com/leomak/491834 and its code at https://rstudio-pubs-static.s3.amazonaws.com/516793_f3322dd153e543ec9a84da3ceccd46da.html. Part of the codes and equations are copied from these two links.  
+
+In this project, a 1-gram, 2-gram and 3-gram are used to build the model and calculate the probability of a next-word prediction. The accuracy of the model is computed using 3-gram testing data. The content of this project is:
+
+* Read in Data
+* Data Preprocessing
+* Good-Turing Smoothing
+* N-grams Preparation
+* Build the model
+* Evaluate the model
+* Summary
+
+
+## 1. Read in Data
+
+
+```{r, warning=FALSE, message=FALSE}
+start <- Sys.time()
+library(stringr)
+library(stringi)
+Data_Directory <- "D:/Core/Google/Data Science--Statistics and ML/5. Capstone/final/en_US"
+# set data directory as current working directory
+setwd(Data_Directory)
+#get all file names under current directory
+files_list <- 
+  list.files(path = Data_Directory, pattern = "*.txt", recursive = TRUE)
+#number of files
+NF <- length(files_list)
+#read all files into dataframes
+dfname <- c()       #data frame names
+for (i in 1:NF)
+{
+  file_Cont <- str_match(files_list[i], "\\s*(.*?)\\s*.txt")[,2] #get substring of filename as data frame name
+  file_Cont <- str_replace_all(file_Cont,"[.]","_")
+  dfname[i] <- file_Cont
+  #dfname[i] <- paste( "F", i, file_Cont,sep="_")   #data frame name
+  assign(dfname[i],readLines(files_list[i]))  #import csv file and assing to data frame
+}
+setwd("D:/Core/Google/Data Science--Statistics and ML/5. Capstone")
+remove(Data_Directory, dfname, file_Cont, files_list, NF, i)
+stop <- Sys.time()
+print(paste("This block takes ", round(as.numeric(difftime(time1 = stop, 
+                    time2 = start, units = "secs")), 3), " Seconds"))
+```
+
+## 2. Data Preporcessing
+
+It's definitely good to have all read in data as corpus, however, it takes a long time to tokenize the whole data set. Here uses 10% data to reduce the training and prediction. Another 1% data are used as testing data to evaluate the model accuracy. 
+
+```{r, warning=FALSE,message=FALSE}
+start <- Sys.time()
+library(qdap)
+library(quanteda)
+set.seed(2024-04-07)
+#training sample
+sample_size = 0.8
+sample_blogs <- sample(en_US_blogs, sample_size*length(en_US_blogs))
+sample_news <- sample(en_US_news, sample_size*length(en_US_news))
+sample_twitter <- sample(en_US_twitter, sample_size*length(en_US_twitter))
+samples <- c(sample_blogs, sample_news, sample_twitter)
+Corpus_en <- corpus(samples)
+#testing sample
+test_sample_size = 0.01
+sample_blogs <- sample(en_US_blogs, test_sample_size*length(en_US_blogs))
+sample_news <- sample(en_US_news, test_sample_size*length(en_US_news))
+sample_twitter <- sample(en_US_twitter, test_sample_size*length(en_US_twitter))
+samples <- c(sample_blogs, sample_news, sample_twitter)
+Corpus_en_testing <- corpus(samples)
+remove(sample_blogs, sample_news, sample_twitter, samples, en_US_blogs, 
+       en_US_news, en_US_twitter)
+remove(sample_size, test_sample_size)
+stop <- Sys.time()
+print(paste("This block takes ", round(as.numeric(difftime(time1 = stop, 
+                    time2 = start, units = "secs")), 3), " Seconds"))
+```
+
+Tokenize the data and remove everything we don't need.
+
+``` {r, warning=FALSE}
+start <- Sys.time()
+Corpus_en <- corpus_group(Corpus_en)          
+toks <- tokens(char_tolower(Corpus_en))
+toks <- tokens(toks, remove_punct = TRUE)
+toks <- tokens(toks, remove_numbers = TRUE)
+toks <- tokens(toks, remove_symbols = TRUE)
+toks <- tokens(toks, remove_url = TRUE)
+toks <- tokens(toks, remove_HashTags = TRUE)
+toks <- tokens(toks, remove_TwitterHandles = TRUE)
+toks <- tokens(toks, remove_nonAscii = TRUE)
+toks <- tokens(toks, remove_hyphens = TRUE)
+toks<-tokens_remove(toks, stopwords("english"))
+remove(Corpus_en)
+stop <- Sys.time()
+print(paste("This block takes ", round(as.numeric(difftime(time1 = stop, 
+                    time2 = start, units = "secs")), 3), " Seconds"))
+```
+
+``` {r, warning=FALSE}
+Corpus_en_testing <- corpus_group(Corpus_en_testing)
+toks_testing <- tokens(char_tolower(Corpus_en_testing))
+toks_testing <- tokens(toks_testing, remove_punct = TRUE)
+toks_testing <- tokens(toks_testing, remove_numbers = TRUE)
+toks_testing <- tokens(toks_testing, remove_symbols = TRUE)
+toks_testing <- tokens(toks_testing, remove_url = TRUE)
+toks_testing <- tokens(toks_testing, remove_HashTags = TRUE)
+toks_testing <- tokens(toks_testing, remove_TwitterHandles = TRUE)
+toks_testing <- tokens(toks_testing, remove_nonAscii = TRUE)
+toks_testing <- tokens(toks_testing, remove_hyphens = TRUE)
+toks_testing<-tokens_remove(toks_testing, stopwords("english"))
+remove(Corpus_en_testing)
+```
+
+Define a function to build n-gram and ignore counts < min_count, which is 4 in this project.
+
+```{r, warning=FALSE, message=FALSE}
+start <- Sys.time()
+library(data.table)
+min_count <- 4
+get_n_gram <- function(N){
+  gram <- tokens_ngrams(toks, n=N, skip= 0, concatenator = "_")
+  dfm_n <- dfm(gram)
+  dfm_n <- dfm_wordstem(dfm_n)
+  tf_4 <- topfeatures(dfm_n, length(dfm_n))
+  n_gram <- data.frame(tf_4)
+  n_gram$Word <- rownames(n_gram)
+  colnames(n_gram)[1] <- "Counts"
+  row.names(n_gram) <- NULL
+  n_gram <- n_gram[n_gram$Counts>min_count,]
+  return(data.table(n_gram))
+}
+#1-gram, 2-gram, 3-gram used for training and prediction
+gram_1 <- get_n_gram(1)
+gram_2 <- get_n_gram(2)
+gram_3 <- get_n_gram(3)
+#4-gram used for evaluation
+#gram_4 <- get_n_gram(4)
+remove(toks)
+stop <- Sys.time()
+print(paste("This block takes ", round(as.numeric(difftime(time1 = stop, 
+                    time2 = start, units = "secs")), 3), " Seconds"))
+```
+
+## 3. Good-Turing Smoothing
+
+#### 3.1 Define a function to calculate the $N^r$, which is the frequency of frequency of Good-Turing Discounting Algorithm. 
+
+```{r, warning=FALSE}
+start <- Sys.time()
+CountNC  <- function(Vec){
+  Count <- table(Vec$Counts)
+  Nr<- as.integer(Count)
+  c <- as.integer(names(Count))
+  tbl <- data.table(cbind(c,Nr))
+  return(tbl)
+}
+bin_1 <- CountNC(gram_1)
+bin_2 <- CountNC(gram_2)
+bin_3 <- CountNC(gram_3)
+stop <- Sys.time()
+print(paste("This block takes ", round(as.numeric(difftime(time1 = stop, 
+                    time2 = start, units = "secs")), 3), " Seconds"))
+```
+
+#### 3.2 Average all the non-zero counts using equation $Z_r = \frac{N_r}{0.5(t-q)}$.
+
+```{r}
+start <- Sys.time()
+#Average non-zero count, replace N_r with Z_r
+avg_zr <- function(bins){
+  max <- dim(bins)[1]
+  r <- 1:(max-1)
+  #r=1
+  temp <- 2*bins[1,]$Nr/bins[2,]$c
+  bins[1, Zr:=temp]                           #r=1, q=0, zr=Nr/(0.5t)
+  temp <- 2*bins[r,]$Nr/(bins[r+1,]$c-bins[r-1,]$c)
+  bins[r, Zr:=temp]                           #else, Zr=Nr/(0.5(t-q))
+  temp <- bins[max,]$Nr/(bins[max,]$c-bins[max-1,]$c)
+  bins[max, Zr:=temp]                          # r=max, t=2r-1, Zr=Nr/(r-q)
+}  
+avg_zr(bin_1)
+avg_zr(bin_2)
+avg_zr(bin_3)
+stop <- Sys.time()
+print(paste("This block takes ", round(as.numeric(difftime(time1 = stop, 
+                    time2 = start, units = "secs")), 3), " Seconds"))
+```
+
+#### 3.3 Fit a linear model $log(Z_r) = a + blog(r)$
+
+```{r}
+start <- Sys.time()
+FitLM <- function(tbl){
+  fit <- lm(log(Zr)~log(c), data=tbl)
+  return(fit)
+}
+fit_1 <- FitLM(bin_1)
+fit_2 <- FitLM(bin_2)
+fit_3 <- FitLM(bin_3)
+stop <- Sys.time()
+print(paste("This block takes ", round(as.numeric(difftime(time1 = stop, 
+                    time2 = start, units = "secs")), 3), " Seconds"))
+```
+
+#### 3.4 Update $r$ with $r^*$ using Katz equation and constant $K$, with update $Z_r$ corresponding to the specifici $r$ read out from the linear regression model.
+
+```{r}
+## only preform the discounting to small count (Counts) n-gram, where Counts<=k, using Katz's formula
+start <- Sys.time()
+k <- 5
+cal_gtdiscount <- function(cnt, N){
+  if (N==1){
+    model <- fit_1
+  }else if(N==2){
+    model <- fit_2
+  } else if (N==3){
+    model <- fit_3
+  }
+  
+  #common parts
+  Z1 <- exp(predict(model, newdata=data.frame(c=1)))
+  Zr <- exp(predict(model, newdata=data.frame(c=cnt)))
+  Zrp1 <- exp(predict(model, newdata=data.frame(c=(cnt+1))))
+  Zkp1 <- exp(predict(model, newdata=data.frame(c=(k+1))))
+  
+  sub <- ((k+1)*Zkp1)/(Z1)
+  new_r <- ((cnt+1)*Zrp1/Zr-cnt*sub)/(1-sub)
+  return(new_r)
+}
+
+UpdateCount  <- function(Tbl, N){
+  #first creat cDis column, then replace cDis where Counts <= k
+  Tbl[Counts>5, cDis:=as.numeric(Counts)]
+  Tbl[Counts<=k,cDis:= cal_gtdiscount(Counts, N)]
+  
+}
+UpdateCount(gram_1, 1)
+UpdateCount(gram_2, 2)
+UpdateCount(gram_3, 3)
+setkey(gram_1, Word)
+setkey(gram_2, Word)
+setkey(gram_3, Word)
+stop <- Sys.time()
+print(paste("This block takes ", round(as.numeric(difftime(time1 = stop, 
+                    time2 = start, units = "secs")), 3), " Seconds"))
+```
+
+## 4. $N$-grams Preparation
+
+The Katz backoff model requires several sets of $N$-gram and ($N$-1)-gram data, according to the user input, to successfully calcualte all the necessary probabilities for comparisons and choose the model suitable next word candidate. The detail algorithm can be found from the two links above.
+
+#### 4.1 Retrieve observed $N$-gram from ($N$-1)-gram
+
+```{r}
+##Return all the observed N-grams given the previous (N-1)-gram
+##
+## - wordseq: character vector of (N-1)-gram separated by underscore, e.g. "x1_x2_..._x(N-1)"
+## - Ngram: datatable of N-grams
+get_obs_ngram <- function(wordseq, Ngram){
+  PreTxt <- sprintf("%s%s%s", "^", wordseq, "_")
+  quest <- grep(PreTxt, Ngram$Word, perl=T, useBytes = T)
+  Ngram[quest,]
+}
+
+```
+
+#### 4.2 Retrieve all the 2-gram that ends with unobserved N-grams
+
+```{r}
+get_unobs_ngram_tails <- function(obsngram, N){
+  obstails <- str_split_fixed(obsngram$Word, "_", N)[,N]
+  return(data.table(Word=gram_1[!obstails,Word,on="Word"]))
+}
+
+```
+
+#### 4.3 Compute the probabilities of observed $N$-grams
+
+```{r}
+cal_obs_prob <- function(ObsNgrams, Nm1Grams, wordseq) {
+  PreCount <- Nm1Grams[wordseq, Counts, on=.(Word)]
+  ObsNgrams[,Prob:=ObsNgrams[,cDis]/PreCount]  # c_dis/c
+}
+
+```
+
+
+#### 4.4 Calculate another parameter alpha
+
+```{r}
+cal_alpha <- function(ObsNGrams, Nm1Grams, wordseq) {
+  if (dim(ObsNGrams)[1] != 0) {
+    # return(1-sum(ObsNGrams[,.(Qbo)]))  # We don't use this formular because End Of Sentence is not counted
+    return(sum(ObsNGrams[,Counts-cDis]/Nm1Grams[wordseq, Counts, on=.(Word)]))
+  } else {
+    return(1)
+  }
+}
+```
+
+
+## 5. Build the model
+
+The final part is to integrate the above steps. 
+
+```{r}
+## Find next word. 
+## Return a list of predicted next words according to previous 2 user input words
+
+## - xy:  string of user-input bigram, separated by a space
+## - predict_n: number of words to predict
+Find_Next_word  <- function(xy, words_num){
+  xy <- gsub(" ", "_", xy)
+  if (length(which(gram_2$Word == xy)) > 0) {  # C(x,y) > 0
+    ## N-grams preparation
+    # Retrieve all observed trigrams beginning with xy: OT
+    ObsTriG <- get_obs_ngram(xy, gram_3)
+    y <- str_split_fixed(xy,"_", 2)[,2]
+    # Retrieve all observed bigrams beginning with y: OB
+    ObsBiG <- get_obs_ngram(y, gram_2)
+    # Retrieve all unigrams end the unobserved bigrams UOBT: z where C(y,z) = 0, UOB in UOT
+    UnObsBiTails <- get_unobs_ngram_tails(ObsBiG, 2)
+    # Exclude observed bigrams that also appear in observed trigrams: OB in UOT
+    ObsBiG <- ObsBiG[!str_split_fixed(ObsTriG[,Word], "_", 2)[,2], on="Word"]
+
+    ## Calculation part
+    # Calculate probabilities of all observed trigrams: P^*(z|x,y)
+    ObsTriG <- cal_obs_prob(ObsTriG, gram_2, xy)
+    # Calculate Alpha(x,y)
+    Alpha_xy <- cal_alpha(ObsTriG, gram_2, xy)
+    # Calculate probabilities of all observed bigrams: P^*(z|y), (y,z) in UOT
+    ObsBiG <- cal_obs_prob(ObsBiG, gram_1, y)
+    # Calculate Alpha(y)
+    Alpha_y <- cal_alpha(ObsBiG, gram_1, y)
+    # Calculate P_{ML}(z), where c(y,z) in UOB: Alpha_y * P_{ML}(z)
+    UnObsBiTails[, Prob:=gram_1[UnObsBiTails, Counts, on=.(Word)]/gram_1[UnObsBiTails, sum(Counts), on=.(Word)]]
+    UnObsBiTails[, Prob:=Alpha_xy*Alpha_y*Prob]
+    # Remove unused column in ObsTriG and ObsBiG
+    ObsTriG[, c("Counts", "cDis"):=NULL]
+    ObsBiG[, c("Counts", "cDis"):=NULL]
+    #remove xy, only keep predict word
+    ObsTriG[, Word:=str_remove(ObsTriG[, Word], "([^_]+_)+")]
+    #remove y, only keep predict word
+    ObsBiG[, Word:=str_remove(ObsBiG[, Word], "([^_]+_)+")]
+    # Compare OT, Alpha_xy * P_{Katz}(z|y)
+    # P_{Katz}(z|y) = 1. P^*(z|y), 2. Alpha_y * P_{ML}(z)
+    ObsBiG[,Prob:=Alpha_xy*Prob]
+    AllTriG <- setorder(rbind(ObsTriG, ObsBiG, UnObsBiTails), -Prob)
+    return(AllTriG[Prob!=0][1:min(dim(AllTriG[Prob!=0])[1], words_num)])
+  } else {  # C(x,y) = 0, or xy is not in N-gram, goes down to (N-1)-gram
+    y <- str_split_fixed(xy,"_", 2)[,2]
+    # c(y>0)
+    if (length(which(gram_1$Word == y)) > 0) {
+      # Retrieve all observed bigrams beginning with y: OB
+      ObsBiG <- get_obs_ngram(y, gram_2)
+      # Calculate probabilities of all observed bigrams: P^*(z|y)
+      ObsBiG <- cal_obs_prob(ObsBiG, gram_1, y)
+      # Calculate Alpha(y)
+      Alpha_y <- cal_alpha(ObsBiG, gram_1, y)
+      # Retrieve all unigrams end the unobserved bigrams UOBT: z where C(y,z) = 0
+      UnObsBiTails <- get_unobs_ngram_tails(ObsBiG, 2)
+      # Calculate P_{ML}(z), where c(y,z) in UOB: Alpha_y * P_{ML}(z)
+      UnObsBiTails[, Prob:=gram_1[UnObsBiTails, Counts, on=.(Word)]/gram_1[UnObsBiTails, sum(Counts), on=.(Word)]]
+      UnObsBiTails[, Prob:=Alpha_y*Prob]
+      # Remove unused column in ObsBiG
+      ObsBiG[, c("Counts", "cDis"):=NULL]
+      ObsBiG[, Word:=str_remove(ObsBiG[, Word], "([^_]+_)+")]
+      AllBiG <- setorder(rbind(ObsBiG, UnObsBiTails), -Prob)
+      return(AllBiG[Prob!=0][1:words_num])
+    } else {  # c(y=0) or y is not in (N-1)-gram, goes down to (N-2)-gram
+      # P^*z
+      return(setorder(gram_1, -cDis)[1:words_num,.(Word, Prob=cDis/gram_1[,sum(Counts)])])  
+    }
+  }
+}
+
+```
+
+Process the input phrase. Get the last **three** words as input to the model. 
+
+```{r}
+## Remove elements not being used by prediction model
+pre_precess <- function(wordseq){
+  tok <- tokens(char_tolower(wordseq))
+  tok <- tokens(tok, remove_punct = TRUE)
+  tok <- tokens(tok, remove_numbers = TRUE)
+  tok <- tokens(tok, remove_symbols = TRUE)
+  tok <- tokens(tok, remove_url = TRUE)
+  tok <- tokens(tok, remove_HashTags = TRUE)
+  tok <- tokens(tok, remove_TwitterHandles = TRUE)
+  tok <- tokens(tok, remove_nonAscii = TRUE)
+  return(paste(tail(tok[[1]], 2), collapse = " "))
+}
+```
+
+Predict next word. Here predict 5 possible words listed high to low by their probablities. 
+
+```{r}
+Next_word_pred <- function(prephrase, num=5){
+  temp <- pre_precess(prephrase)
+  result <- Find_Next_word(temp, num)
+  if (dim(result)[1]==0){
+    rbind(result, list("<Please input more words",1))
+  }
+  return(result)
+}
+```
+
+Test models using few phrases
+
+```{r}
+start <- Sys.time()
+Next_word_pred("He likes to eat ice")
+stop <- Sys.time()
+print(paste("This block takes ", round(as.numeric(difftime(time1 = stop, 
+                    time2 = start, units = "secs")), 3), " Seconds"))
+```
+
+```{r}
+start <- Sys.time()
+Next_word_pred("the prime minister")
+stop <- Sys.time()
+print(paste("This block takes ", round(as.numeric(difftime(time1 = stop, 
+                    time2 = start, units = "secs")), 3), " Seconds"))
+```
+
+```{r}
+start <- Sys.time()
+Next_word_pred("a nuclear power")
+stop <- Sys.time()
+print(paste("This block takes ", round(as.numeric(difftime(time1 = stop, 
+                    time2 = start, units = "secs")), 3), " Seconds"))
+```
+Predict more than 1 word
+
+```{r}
+#add predicted word to input phrase
+add_word <- function(prephrase, pred_word){
+  new_phrase <- paste(prephrase, pred_word)
+  return(new_phrase)
+}
+
+```
+
+Here assumes 5 words to predict. 
+```{r}
+Next_words_pred <- function(prephrase, num=5){
+  results <- data.frame()
+  for (I in 1:num){
+    temp <- pre_precess(prephrase)
+    next_word <- Find_Next_word(temp, 1)
+    if (dim(next_word)[1]==0){
+      rbind(next_word, list("<Please input more words",1))
+    }
+    prephrase<- add_word(prephrase, next_word$Word)
+    results <- rbind(results, next_word)
+  }
+  # here assume the simplest probabilities. Each prediction is independent.
+  for (I in 2:num){
+    results[I,]$Prob <- results[I,]$Prob*results[I-1,]$Prob
+  }
+  output <- list(results, prephrase)
+  return(output)
+}
+
+```
+
+
+```{r}
+start <- Sys.time()
+output <- Next_words_pred("He likes to eat ice")
+print(output[[1]])
+stop <- Sys.time()
+```
+print the predicted sentences.
+
+```{r}
+print(output[[2]])
+print(paste("The prediction of 5 words takes ", round(as.numeric(difftime(time1 = stop, 
+                    time2 = start, units = "secs")), 3), " Seconds"))
+```
+It is clear that the first word has higher probabilities and the probability of next word is lower. With sentence longer and longer, the probability or perplexity becomes lower and lower. 
+
+
+## 6. Evaluate the model
+
+The prediction model uses 1-gram, 2-gram and 3-gram to predict the next word. To evaluate the accuracy of the model, the testing data are converted to 3-gram. The first two words of the testing 3-gram are used to predict the next word, which is compared with the last word in testing 3-gram. If they match, here counts 1. Otherwise, it counts 0. 
+
+```{r}
+## build the 3-gram for testing
+gram <- tokens_ngrams(toks_testing, n=3, skip= 0, concatenator = "_")
+dfm_n <- dfm(gram)
+dfm_n <- dfm_wordstem(dfm_n)
+tf_4 <- topfeatures(dfm_n, length(dfm_n))
+gram_testing <- data.frame(tf_4)
+gram_testing$Word <- rownames(gram_testing)
+colnames(gram_testing)[1] <- "Counts"
+row.names(gram_testing) <- NULL
+gram_testing<- gram_testing[gram_testing$Counts>4,]
+remove(gram, dfm_n, tf_4)
+```
+
+
+
+```{r}
+NT <- dim(gram_testing)[1]
+c <- 0
+for (I in 1:NT){
+  phrase <- gram_testing$Word[I]
+  phrase <- str_split_fixed(phrase,"_",3)
+  xy <- paste(phrase[1], phrase[2])
+  z <- phrase[3]
+  next_word <- Find_Next_word(xy, 1)
+  if (z == next_word$Word){
+    c <- c + 1
+  }
+}
+acc <- c/NT
+print(paste("The accuracy of the prediction model is ", round(acc, 4)))
+```
+
+
+## 7. Summary
+
+The project used 1-gram, 2-gram and 3-gram to predict the next word and its probability. The accuracy of this model is . Most of time consuming part is building n-grams. After the model is built, predicting next word takes less than 1 second. 
+
+There are several ways to improve this model:
+
+* First, it is clear that increasing the corpus size will increase the accuracy of prediction. Limited by the RAM, this project used 20% of the entire data to train the model and 1% of the data to evaluate the model.
+
+* Second, this project used only the last two words of a sentence to predict the next word. It is obvious that using more words will increase the accuracy of prediction, for example, the last 3 or 4 words. However, the model would has to use high grams. For 3 words, 1-gram to 4-gram should be used. 
+
+* Third, predicting more words decrease the probability or perplexity of the sentence. If we can increase the accuracy of each prediction, we can increase the perplexity. 
+
+* Fourth, one possible method to slightly reduce the size of the model without reducing performance can be only keeping the higher frequency words in N-grams. 
+
+
+## 8. Save data for Shiny App
+
+```{r}
+write.csv(gram_1, "gram_1.csv")
+write.csv(gram_2, "gram_2.csv")
+write.csv(gram_3, "gram_3.csv")
+
+```
+
+```{r}
+gram_1 <- read.csv("gram_1.csv")
+gram_2 <- read.csv("gram_2.csv")
+gram_3 <- read.csv("gram_3.csv")
+gram_1 <- data.table(gram_1)
+gram_2 <- data.table(gram_2)
+gram_3 <- data.table(gram_3)
+```
+
+
+

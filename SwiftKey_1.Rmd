@@ -1,0 +1,387 @@
+---
+title: "SwiftKey_Project"
+author: "Wanjie Feng"
+date: "2024-04-07"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Project Overview
+
+This project explores the text data sets of SwifyKey project. Then, this project builds a simple model for the relationship between words. The outline of this project is 
+
+* Read in Data
+* Exploratory Data Analysis
+* Task2 Project Questions
+* Build The Model
+* Task3 Project Questions
+
+
+## 1. Read in Data
+
+
+```{r, warning=FALSE, message=FALSE}
+library(stringr)
+Data_Directory <- "D:/Core/Google/Data Science--Statistics and ML/5. Capstone/final/en_US"
+# set data directory as current working directory
+setwd(Data_Directory)
+#get all file names under current directory
+files_list <- 
+  list.files(path = Data_Directory, pattern = "*.txt", recursive = TRUE)
+#number of files
+NF <- length(files_list)
+#read all files into dataframes
+dfname <- c()       #data frame names
+for (i in 1:NF)
+{
+  file_Cont <- str_match(files_list[i], "\\s*(.*?)\\s*.txt")[,2] #get substring of filename as data frame name
+  file_Cont <- str_replace_all(file_Cont,"[.]","_")
+  dfname[i] <- file_Cont
+  #dfname[i] <- paste( "F", i, file_Cont,sep="_")   #data frame name
+  assign(dfname[i],readLines(files_list[i]))  #import csv file and assing to data frame
+}
+setwd("D:/Core/Google/Data Science--Statistics and ML/5. Capstone")
+remove(Data_Directory, dfname, file_cont, files_list)
+```
+
+
+## 2. Exploratory Data Analysis
+
+First, summarize the text data. 
+
+```{r, warning=FALSE, message=FALSE}
+library(stringi)
+library(dplyr)
+# define a function to count all words without spaces
+char <- function(x) { str_length(x) - str_count(x, " ")}
+# summarize all three data files
+filesummary <- data.frame(Source=c("Blogs","News","Twitter"), 
+             FileSize_MB=c(format(structure(object.size(en_US_blogs), class="object_size"), units="auto"),
+                           format(structure(object.size(en_US_news), class="object_size"), units="auto"),
+                           format(structure(object.size(en_US_twitter), class="object_size"), units="auto") ),
+             Lines=c(length(en_US_blogs),length(en_US_news),length(en_US_twitter)),
+             Words=c(sum(stri_count_words(en_US_blogs)),
+                     sum(stri_count_words(en_US_news)),
+                     sum(stri_count_words(en_US_twitter))),
+             Characters=c(sum(char(en_US_blogs)),sum(char(en_US_news)),sum(char(en_US_twitter))))
+
+filesummary<-mutate(filesummary, 
+                    Words_Per_Line=Words/Lines,
+                    Char_Per_Line=round(Characters/Lines,1),
+                    Char_Per_Word=round(Characters/Words,2))
+filesummary
+```
+
+On my computer, I tried sample it with 100000. It took too long tokenizing words. So Sample data 10000
+
+```{r, warning=FALSE,message=FALSE}
+library(qdap)
+library(quanteda)
+set.seed(2024-04-07)
+sample_blogs <- sample(en_US_blogs, 10000)
+sample_news <- sample(en_US_news, 10000)
+sample_twitter <- sample(en_US_twitter, 10000)
+samples <- c(sample_blogs, sample_news, sample_twitter)
+Corpus_en <- corpus(samples)
+remove(sample_blogs, sample_news, sample_twitter, samples, en_US_blogs, 
+       en_US_news, en_US_twitter)
+```
+
+Tokenize the data and remove everything we don't need.
+
+``` {r}
+Corpus_en <- corpus_group(Corpus_en)
+toks <- tokens(char_tolower(Corpus_en))
+toks <- tokens(toks, remove_punct = TRUE)
+toks <- tokens(toks, remove_numbers = TRUE)
+toks <- tokens(toks, remove_symbols = TRUE)
+toks <- tokens(toks, remove_url = TRUE)
+toks <- tokens(toks, remove_HashTags = TRUE)
+toks <- tokens(toks, remove_TwitterHandles = TRUE)
+toks <- tokens(toks, remove_nonAscii = TRUE)
+#toks<-tokens_remove(toks, stopwords("english"))
+one_gram <- tokens_ngrams(toks, n=1)
+two_gram <- tokens_ngrams(toks, n=2, skip= 0, concatenator = " ")
+three_gram <- tokens_ngrams(toks, n=3, skip= 0, concatenator = " ")
+
+```
+
+Convert to "dfm" for convinence. 
+
+```{r}
+dfm_1 <- dfm(one_gram)
+dfm_1 <- dfm_wordstem(dfm_1)
+dfm_2 <- dfm(two_gram)
+dfm_2 <- dfm_wordstem(dfm_2)
+dfm_3 <- dfm(three_gram)
+dfm_3 <- dfm_wordstem(dfm_3)
+remove(one_gram, two_gram, three_gram)
+```
+
+Get the words and their counts in one-, two-, and three-grams. 
+
+```{r}
+tf_1 <- topfeatures(dfm_1, length(dfm_1))
+tf_2 <- topfeatures(dfm_2, length(dfm_2))
+tf_3 <- topfeatures(dfm_3, length(dfm_3))
+one_gram <- data.frame(tf_1)
+one_gram$Word <- rownames(one_gram)
+colnames(one_gram)[1] <- "Counts"
+
+two_gram <- data.frame(tf_2)
+two_gram$Word <- rownames(two_gram)
+colnames(two_gram)[1] <- "Counts"
+
+three_gram <- data.frame(tf_3)
+three_gram$Word <- rownames(three_gram)
+colnames(three_gram)[1] <- "Counts"
+remove(tf_1, tf_2, tf_3, dfm_1, dfm_2, dfm_3)
+```
+
+## 3. Taks2 Project Questions
+
+
+#### 1. Distribution of word Freqeunces
+
+```{r, message=FALSE,warning=FALSE,fig.width=6,fig.height=6 }
+library(wordcloud)
+library(RColorBrewer)
+wordcloud(one_gram$Word, one_gram$Counts, scale=c(10, 0.2), max.words=200, random.order=FALSE,
+          rot.per=0.25, colors=brewer.pal(10, "Dark2"))
+```
+
+#### 2. Distribution of 2-grams and 3-grams
+
+```{r,fig.width=8,fig.height=8}
+par(mar=c(4,5,1,1))
+barplot(two_gram[1:20,1],col="lightblue",
+        names.arg = two_gram$Word[1:20],
+        space=0.2,las=2, horiz = TRUE,
+        xlab = "Counts",cex.names = 0.7)
+```
+
+```{r,fig.width=8,fig.height=8}
+par(mar=c(4,8,2,2))
+barplot(three_gram[1:20,1],col="lightblue",
+        names.arg = three_gram$Word[1:20],
+        space=0.2,las=2, horiz = TRUE,
+        xlab = "Counts",cex.names = 0.7)
+```
+#### 3. 50% and 90% Pencentile
+```{r}
+one_gram$CuSum <- cumsum(one_gram$Counts)
+one_gram$coverage <- one_gram$CuSum/sum(one_gram$Counts)
+one_gram$ID<-seq.int(nrow(one_gram))
+coverage50 <- subset(one_gram, coverage<0.5)
+coverage90 <- subset(one_gram, coverage<0.9)
+print(paste(nrow(coverage50), " words is need in a frequency sorted dictionary to cover 50% of all word instances"))
+print(paste(nrow(coverage90), " words is need in a frequency sorted dictionary to cover 90% of all word instances"))
+```
+#### 4. Words from Foreign Languages
+
+There are several languages detecting packages, but none of them did a satisfying job. For example, **cld3::detect_language("said")** return "ceb", which is an **Austronesian language**. At last, I used this **detect_luangage_mixed()**, which return the probability of which language. 
+
+```{r}
+library(cld3)
+detect_language_mixed(one_gram$Word, size=1)
+```
+The language is English, but the probability is 95%, which means there are 5% probability the text are foreign language.
+
+#### 5. Increase the Coverage
+
+Increasing the coverage in NLP with limited corpus is not impossible. I asked ChatGPT and there are several ways.
+
+**Word Embeddings**: Utilize word embeddings such as Word2Vec, GloVe, or fastText. These embeddings are trained on large corpora and can represent words as dense vectors in a continuous vector space. They capture semantic and syntactic similarities between words, making them useful for tasks like word similarity, analogy, and word sense disambiguation. Even if a specific word isn't in the original corpus, its embedding can still capture its semantic meaning based on its context.
+
+**Subword Tokenization**: Instead of tokenizing text into individual words, tokenize it into subword units like characters or character n-grams. This approach allows for better coverage of out-of-vocabulary words and can generalize better to unseen words.
+
+**Morphological Analysis**: Incorporate morphological analysis techniques to break down words into their root forms and affixes. By understanding the morphological structure of words, you can cover a wider range of word variations using a smaller dictionary.
+
+**Synonym Expansion**: Augment your dictionary with synonyms and near-synonyms of existing words. This can be achieved using lexical databases such as WordNet or through word embedding-based similarity measures.
+
+**Contextual Language Models**: Employ pre-trained contextual language models like BERT, GPT, or XLNet. These models have been trained on vast amounts of text data and can generate embeddings for any word in the context of a given sentence, even if the word is rare or unseen in the training data.
+
+**Transfer Learning**: Fine-tune existing language models on domain-specific or task-specific data to adapt them to your specific vocabulary. Transfer learning allows models to leverage knowledge from a source domain (e.g., general English language) to a target domain (e.g., medical texts).
+
+**Data Augmentation**: Generate synthetic data by applying simple transformations such as synonym replacement, word shuffling, or inserting typographical errors. This can help expose the model to a wider variety of linguistic variations.
+
+**Active Learning**: Use active learning techniques to iteratively select the most informative samples for annotation. By focusing annotation efforts on the most uncertain or challenging cases, you can effectively expand coverage in specific areas of interest.
+
+## 4. Build the Model
+
+There are several ways to build a prediction model corresponding to one corpus. A simple model uses n-gram model. For example, here builds 2-to 7-gram models. When predicting, we find the match string in this model and makes a prediction. 
+
+```{r}
+four_gram <- tokens_ngrams(toks, n=4, skip= 0, concatenator = " ")
+dfm_4 <- dfm(four_gram)
+remove(four_gram)
+dfm_4 <- dfm_wordstem(dfm_4)
+tf_4 <- topfeatures(dfm_4, length(dfm_4))
+four_gram <- data.frame(tf_4)
+four_gram$Word <- rownames(four_gram)
+colnames(four_gram)[1] <- "Counts"
+
+five_gram <- tokens_ngrams(toks, n=5, skip= 0, concatenator = " ")
+dfm_5 <- dfm(five_gram)
+remove(five_gram)
+dfm_5 <- dfm_wordstem(dfm_5)
+tf_5 <- topfeatures(dfm_5, length(dfm_5))
+five_gram <- data.frame(tf_5)
+five_gram$Word <- rownames(five_gram)
+colnames(five_gram)[1] <- "Counts"
+
+six_gram <- tokens_ngrams(toks, n=6, skip= 0, concatenator = " ")
+dfm_6 <- dfm(six_gram)
+remove(six_gram)
+dfm_6 <- dfm_wordstem(dfm_6)
+tf_6 <- topfeatures(dfm_6, length(dfm_6))
+six_gram <- data.frame(tf_6)
+six_gram$Word <- rownames(six_gram)
+colnames(six_gram)[1] <- "Counts"
+
+seven_gram <- tokens_ngrams(toks, n=7, skip= 0, concatenator = " ")
+dfm_7 <- dfm(seven_gram)
+remove(seven_gram)
+dfm_7 <- dfm_wordstem(dfm_7)
+tf_7 <- topfeatures(dfm_7, length(dfm_7))
+seven_gram <- data.frame(tf_7)
+seven_gram$Word <- rownames(seven_gram)
+colnames(seven_gram)[1] <- "Counts"
+
+eight_gram <- tokens_ngrams(toks, n=8, skip= 0, concatenator = " ")
+dfm_8 <- dfm(eight_gram)
+remove(eight_gram)
+dfm_8 <- dfm_wordstem(dfm_8)
+tf_8 <- topfeatures(dfm_8, length(dfm_8))
+eight_gram <- data.frame(tf_8)
+eight_gram$Word <- rownames(eight_gram)
+colnames(eight_gram)[1] <- "Counts"
+
+nine_gram <- tokens_ngrams(toks, n=9, skip= 0, concatenator = " ")
+dfm_9 <- dfm(nine_gram)
+remove(nine_gram)
+dfm_9 <- dfm_wordstem(dfm_9)
+tf_9 <- topfeatures(dfm_9, length(dfm_9))
+nine_gram <- data.frame(tf_9)
+nine_gram$Word <- rownames(nine_gram)
+colnames(nine_gram)[1] <- "Counts"
+
+ten_gram <- tokens_ngrams(toks, n=10, skip= 0, concatenator = " ")
+dfm_10 <- dfm(ten_gram)
+remove(ten_gram)
+dfm_10 <- dfm_wordstem(dfm_10)
+tf_10 <- topfeatures(dfm_10, length(dfm_10))
+ten_gram <- data.frame(tf_10)
+ten_gram$Word <- rownames(ten_gram)
+colnames(ten_gram)[1] <- "Counts"
+
+remove(dfm_4, dfm_5, dfm_6, dfm_7, dfm_8, dfm_9, dfm_10)
+remove(tf_4, tf_5, tf_6, tf_7, tf_8, tf_9, tf_10)
+```
+
+Next, merge 2- to 10-grams to one list. 
+
+```{r}
+grams <- list(two_gram, three_gram, four_gram, five_gram,
+              six_gram,seven_gram, eight_gram, nine_gram, ten_gram)
+remove(two_gram, three_gram, four_gram, five_gram,
+              six_gram,seven_gram, eight_gram, nine_gram, ten_gram)
+```
+
+Define the prediction function. Here only predicts single word.
+
+```{r}
+NextWord_pred <- function(intxt){
+  len <- length(strsplit(intxt, split=" ")[[1]])   #length of input string
+  if (len >9){
+    temp <- str_split(intxt, ' ')
+    intxt <- paste(tail(temp[[1]],9),collapse = " ")
+    len <- 9
+  }
+  gram <- grams[[len]]                             # searth len+1 gram
+  quest <- grepl(intxt, gram$Word, ignore.case = TRUE)
+  temp_txt <- gram[quest,]
+  n_temp <- length(temp_txt$Word)
+  columns <- c("Word", "Counts")
+  NextWords <- data.frame(matrix(nrow=0, ncol=length(columns)))
+  colnames(NextWords) = columns
+  if (n_temp > 0){
+    j = 1
+    for (i in 1:n_temp){
+      if(endsWith(temp_txt[i,]$Word, intxt)){
+        next
+      }
+      temp <- sub(intxt, '', temp_txt[i,]$Word)      # get the word after intxt
+      temp <- str_trim(temp)                         # remove whitespace
+      NextWords[j,]$Word <- temp                     # save word
+      NextWords[j,]$Counts <- temp_txt[i,]$Counts    # save counts
+      j <- j + 1  
+    }
+    return (NextWords)
+  }else if(n_temp <=0){
+    print(paste('\"', intxt,"\"", 
+                "cannot find the next word, please try a different one"), quote = FALSE)
+    return ("")
+  }
+  
+  
+}
+```
+
+Let's try a prediction of "i want to". 
+
+```{r}
+intxt = "i want to"
+nextword <- NextWord_pred(intxt=intxt)
+print(nextword)
+```
+
+Based on first word prediction, we can predict next one.
+```{r}
+intxt <- paste(intxt, nextword[1,]$Word)
+nextword <- NextWord_pred(intxt=intxt)
+print(nextword)
+```
+
+Next, we can contine this step and get a full sentence. 
+
+If the query is not in any n-gram, it will print a message. For example, let's try "ii want to".
+
+```{r}
+intxt = "the prime minister"
+nextword <- NextWord_pred(intxt=intxt)
+print(nextword)
+```
+
+## 5. Task 3 Project Questions
+
+#### 1. How can you efficiently store an n-gram model (think Markov Chains)?
+
+This project saves the n-gram model in a list. In future, this can also be stored in a tree. 
+
+#### 2. How can you use the knowledge about word frequencies to make your model smaller and more efficient?
+
+It is possible to delete part of the gram when their frequencies are lower than a thereshold. 
+
+#### 3. How many parameters do you need (i.e. how big is n in your n-gram model)?
+
+This project used 2- to 10- gram model, which can be increased to bigger gram if needed.
+
+#### 4. Can you think of simple ways to "smooth" the probabilities (think about giving all n-grams a non-zero probability even if they aren't observed in the data) ?
+
+The simple way is tot add a pseudo count of 1 to all outcomes in the sample space. This ensures that no probability is zero. Another method is combining absolute discounting with continuation probabilities. This models the probability of a word following an n-1 gram. Also, there are other methods too.
+
+#### 5. How do you evaluate whether your model is any good?
+
+We can split the data into training and testing. After building the model, we test the model using testing data set. 
+
+#### 6. How can you use *backoff models* to estimate the probability of unobserved n-grams?
+
+If the probability of an n-gram is zero, the model backs off to the probability of an (n-1)-gram, and so on, until it finds a non-zero probability. At each step of backoff, it can apply smoothing techniques to estimate the probability of unobserved n-grams based on the lower-order n-grams. After estimating the probability using backoff and possibly smoothing techinques, it ensures that the probabilities of all possible outcomes sum up to 1.0. 
+
+
+
+
